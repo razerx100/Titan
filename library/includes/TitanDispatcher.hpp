@@ -4,6 +4,7 @@
 #include <vector>
 #include <functional>
 #include <memory>
+#include <ranges>
 #include <algorithm>
 #include <TitanEvent.hpp>
 
@@ -24,18 +25,33 @@ template<typename EnumType>
 class TitanDispatcher
 {
 public:
-	using BaseEvent    = TitanEvent<EnumType>;
-	using CallbackType = std::shared_ptr<ITitanDispatchable<EnumType>>;
+	using BaseEvent       = TitanEvent<EnumType>;
+	using CallbackRefType = std::weak_ptr<ITitanDispatchable<EnumType>>;
 
 private:
-	using SubscribedCallbacks = std::vector<CallbackType>;
+	using SubscribedCallbacks = std::vector<CallbackRefType>;
 	using SubscribersType     = std::array<SubscribedCallbacks, static_cast<size_t>(EnumType::None)>;
 
 public:
 	// The registered callback should be threadsafe.
-	void Subscribe(EnumType type, CallbackType callback) noexcept
+	void Subscribe(EnumType type, CallbackRefType callback) noexcept
 	{
-		GetSubscribers(type).emplace_back(std::move(callback));
+		SubscribedCallbacks& subscribedCallbacks = GetSubscribers(type);
+
+		EraseExpiredCallbacks(subscribedCallbacks);
+
+		auto result = std::ranges::find_if(subscribedCallbacks,
+			[&callback](const CallbackRefType& other)
+			{
+				return callback.lock() == other.lock();
+			}
+		);
+
+		// If there is a result, it can be a nullptr or we already have a callback of that type.
+		// So, only add the callback if it doesn't exist.
+		if (result == std::end(subscribedCallbacks))
+			if (!callback.expired())
+				subscribedCallbacks.emplace_back(std::move(callback));
 	}
 
 	void Dispatch(const BaseEvent& eventObj)
@@ -43,23 +59,33 @@ public:
 		EnumType eventType               = eventObj.GetType();
 		SubscribedCallbacks& subscribers = GetSubscribers(eventType);
 
-		std::erase_if(subscribers, [&eventObj](const CallbackType& dispatchable)
-			{
-				if (dispatchable.use_count() == 1u)
-					return true;
-				else
-				{
-					dispatchable->ProcessEvent(eventObj);
-					return false;
-				}
-			});
+		EraseExpiredCallbacks(subscribers);
+
+		for (CallbackRefType& callback : subscribers)
+			// I am checking if the generated shared_ptr is null instead of if the weak_ptr has expired
+			// or not because there is a slight window for the weak_ptr to expire after we have done the
+			// checking and before the shared_ptr is created, if the owning pointer is destroyed in a
+			// different thread. But in this way, we might send a useless event but at least it the
+			// program wouldn't crash because of nullptr dereferencing. The chance of this happening is
+			// extremely low but why take risks?
+			if (auto owningCallback = callback.lock(); owningCallback)
+				owningCallback->ProcessEvent(eventObj);
 	}
 
 private:
-	[[nodiscard]]
-	SubscribedCallbacks& GetSubscribers(EnumType type) noexcept
+	void EraseExpiredCallbacks(SubscribedCallbacks& callbacks) noexcept
 	{
-		return m_subscribers.at(static_cast<size_t>(type));
+		std::erase_if(callbacks, [](const CallbackRefType& callback)
+			{
+				return callback.expired();
+			}
+		);
+	}
+
+	[[nodiscard]]
+	SubscribedCallbacks& GetSubscribers(EnumType eventType) noexcept
+	{
+		return m_subscribers.at(static_cast<size_t>(eventType));
 	}
 
 private:

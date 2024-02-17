@@ -77,9 +77,11 @@ TEST(TitanEventTest, EventTest)
 	{
 		User user1{};
 		user1.SubscribeToA(testDispatcher);
+		user1.SubscribeToB(testDispatcher);
 	}
 
 	User user1{};
+	user1.SubscribeToA(testDispatcher);
 	user1.SubscribeToB(testDispatcher);
 
 	EventA eventA{};
