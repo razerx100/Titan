@@ -71,6 +71,22 @@ public:
 		subscribedCallbacks.erase(result);
 	}
 
+	// Subscribe to all types of events.
+	void Subscribe(CallbackRefType callback) noexcept
+	{
+		const auto typeCount = static_cast<size_t>(EnumType::None);
+		for (size_t typeIndex = 0u; typeIndex < typeCount; ++typeIndex)
+			Subscribe(static_cast<EnumType>(typeIndex), callback);
+	}
+
+	// Unsubscribe from all types of events.
+	void Unsubscribe(CallbackRefType callback) noexcept
+	{
+		const auto typeCount = static_cast<size_t>(EnumType::None);
+		for (size_t typeIndex = 0u; typeIndex < typeCount; ++typeIndex)
+			Unsubscribe(static_cast<EnumType>(typeIndex), callback);
+	}
+
 	void Dispatch(const BaseEvent& eventObj)
 	{
 		EnumType eventType               = eventObj.GetType();
