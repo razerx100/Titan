@@ -54,6 +54,23 @@ public:
 				subscribedCallbacks.emplace_back(std::move(callback));
 	}
 
+	void Unsubscribe(EnumType type, CallbackRefType callback) noexcept
+	{
+		SubscribedCallbacks& subscribedCallbacks = GetSubscribers(type);
+
+		// I am using find_if here instead of erase_if because there shouldn't be any duplicates,
+		// so I won't need to look anymore once I have found a result and erase_if will search the
+		// whole container even if a match is found.
+		auto result = std::ranges::find_if(subscribedCallbacks,
+			[&callback](const CallbackRefType& other)
+			{
+				return callback.lock() == other.lock();
+			}
+		);
+
+		subscribedCallbacks.erase(result);
+	}
+
 	void Dispatch(const BaseEvent& eventObj)
 	{
 		EnumType eventType               = eventObj.GetType();
