@@ -32,6 +32,18 @@ public:
 	}
 };
 
+using TestFeedbackEvent = FeedbackEvent<TestEventType>;
+
+class EventC : public TestFeedbackEvent
+{
+public:
+	[[nodiscard]]
+	TestEventType GetType() const noexcept override
+	{
+		return TestEventType::C;
+	}
+};
+
 using TitanTestDispatcher = TitanDispatcher<TestEventType>;
 
 class User
@@ -43,7 +55,7 @@ public:
 	public:
 		Dispatchable(std::string_view name) : m_name{ std::move(name) } {}
 
-		void ProcessEvent(const TestEventBaseType& eventt) override
+		void ProcessEvent(TestEventBaseType& eventt) override
 		{
 			if (eventt.GetType() == TestEventType::A)
 				std::cout << m_name << " " << static_cast<size_t>(eventt.GetType()) << "\n";
@@ -51,6 +63,17 @@ public:
 			{
 				const EventB& eventB = eventt.CastType<EventB>();
 				std::cout << m_name << " " << eventB.GetString() << "\n";
+			}
+			else if (eventt.GetType() == TestEventType::C)
+			{
+				EventC& eventC = eventt.CastType<EventC>();
+				// async
+				auto waitVar = std::async(std::launch::async,
+					[](EventC::Subscription sub)
+					{
+						std::cout << "Paused Event C's owner, doing stuff.\n";
+					}
+				, eventC.GetSubscription());
 			}
 		}
 	};
@@ -65,6 +88,10 @@ public:
 	{
 		dispatcher.Subscribe(TestEventType::B, m_eventReceiver);
 	}
+	void SubscribeToC(TitanTestDispatcher& dispatcher)
+	{
+		dispatcher.Subscribe(TestEventType::C, m_eventReceiver);
+	}
 	void UnsubscribeToA(TitanTestDispatcher& dispatcher)
 	{
 		dispatcher.Unsubscribe(TestEventType::A, m_eventReceiver);
@@ -72,6 +99,10 @@ public:
 	void UnsubscribeToB(TitanTestDispatcher& dispatcher)
 	{
 		dispatcher.Unsubscribe(TestEventType::B, m_eventReceiver);
+	}
+	void UnsubscribeToC(TitanTestDispatcher& dispatcher)
+	{
+		dispatcher.Unsubscribe(TestEventType::C, m_eventReceiver);
 	}
 
 private:
@@ -118,4 +149,26 @@ TEST(TitanEventTest, EventUnsubscribeTest)
 	user1.UnsubscribeToA(testDispatcher);
 
 	testDispatcher.Dispatch(eventA);
+}
+
+TEST(TitanEventTest, FeedbackEventTest)
+{
+	TitanTestDispatcher testDispatcher{};
+
+	User user{ "User" };
+	user.SubscribeToC(testDispatcher);
+
+	{
+		EventC eventC{};
+		std::future<void> waitObj = testDispatcher.DispatchFeedback(eventC);
+		waitObj.wait();
+	}
+
+	user.UnsubscribeToC(testDispatcher);
+
+	{
+		EventC eventC1{};
+		std::future<void> waitObj1 = testDispatcher.DispatchFeedback(eventC1);
+		waitObj1.wait();
+	}
 }
