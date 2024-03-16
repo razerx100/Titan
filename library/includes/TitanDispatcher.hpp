@@ -14,7 +14,7 @@ class ITitanDispatchable
 public:
 	virtual ~ITitanDispatchable() = default;
 
-	virtual void ProcessEvent(const TitanEvent<EnumType>& event) = 0u;
+	virtual void ProcessEvent(TitanEvent<EnumType>& event) = 0u;
 };
 
 // The intended use would be to define an Enum class for a program,
@@ -25,8 +25,9 @@ template<typename EnumType>
 class TitanDispatcher
 {
 public:
-	using BaseEvent       = TitanEvent<EnumType>;
-	using CallbackRefType = std::weak_ptr<ITitanDispatchable<EnumType>>;
+	using BaseEvent         = TitanEvent<EnumType>;
+	using BaseFeedbackEvent = FeedbackEvent<EnumType>;
+	using CallbackRefType   = std::weak_ptr<ITitanDispatchable<EnumType>>;
 
 private:
 	using SubscribedCallbacks = std::vector<CallbackRefType>;
@@ -87,7 +88,7 @@ public:
 			Unsubscribe(static_cast<EnumType>(typeIndex), callback);
 	}
 
-	void Dispatch(const BaseEvent& eventObj)
+	void Dispatch(BaseEvent& eventObj)
 	{
 		EnumType eventType               = eventObj.GetType();
 		SubscribedCallbacks& subscribers = GetSubscribers(eventType);
@@ -103,6 +104,20 @@ public:
 			// extremely low but why take risks?
 			if (auto owningCallback = callback.lock(); owningCallback)
 				owningCallback->ProcessEvent(eventObj);
+	}
+	void Dispatch(BaseEvent&& eventObj)
+	{
+		Dispatch(eventObj);
+	}
+
+	// Don't dispatch the same event twice. Or the returned future will be invalid.
+	std::future<void> DispatchFeedback(BaseFeedbackEvent& eventObj)
+	{
+		Dispatch(eventObj);
+
+		eventObj.SetPromiseIfNoSubscribers();
+
+		return eventObj.GetEventFuture();
 	}
 
 private:
