@@ -111,6 +111,7 @@ public:
 	}
 
 	// Don't dispatch the same event twice. Or the returned future will be invalid.
+	[[nodiscard]]
 	std::future<void> DispatchFeedback(BaseFeedbackEvent& eventObj)
 	{
 		Dispatch(eventObj);
