@@ -6,6 +6,7 @@
 #include <memory>
 #include <ranges>
 #include <algorithm>
+#include <mutex>
 #include <TitanEvent.hpp>
 
 template<typename EnumType>
@@ -34,9 +35,13 @@ private:
 	using SubscribersType     = std::array<SubscribedCallbacks, static_cast<size_t>(EnumType::None)>;
 
 public:
+	TitanDispatcher() : m_subscribers{}, m_subscriberMutex{} {}
+
 	// The registered callback should be threadsafe.
 	void Subscribe(EnumType type, CallbackRefType callback) noexcept
 	{
+		std::lock_guard lock{ m_subscriberMutex };
+
 		SubscribedCallbacks& subscribedCallbacks = GetSubscribers(type);
 
 		EraseExpiredCallbacks(subscribedCallbacks);
@@ -57,6 +62,8 @@ public:
 
 	void Unsubscribe(EnumType type, CallbackRefType callback) noexcept
 	{
+		std::lock_guard lock{ m_subscriberMutex };
+
 		SubscribedCallbacks& subscribedCallbacks = GetSubscribers(type);
 
 		// I am using find_if here instead of erase_if because there shouldn't be any duplicates,
@@ -90,12 +97,20 @@ public:
 
 	void Dispatch(BaseEvent& eventObj)
 	{
-		EnumType eventType               = eventObj.GetType();
-		SubscribedCallbacks& subscribers = GetSubscribers(eventType);
+		EnumType eventType = eventObj.GetType();
 
-		EraseExpiredCallbacks(subscribers);
+		{
+			// Only locking this part, since the callback might open Pandora's Box. But it will
+			// be the consuming function's responsibility to make those threadsafe.
+			std::lock_guard lock{ m_subscriberMutex };
+			SubscribedCallbacks& subscribers = GetSubscribers(eventType);
 
-		for (CallbackRefType& callback : subscribers)
+			EraseExpiredCallbacks(subscribers);
+		}
+
+		const SubscribedCallbacks& subscribers = GetSubscribers(eventType);
+
+		for (const CallbackRefType& callback : subscribers)
 			// I am checking if the generated shared_ptr is null instead of if the weak_ptr has expired
 			// or not because there is a slight window for the weak_ptr to expire after we have done the
 			// checking and before the shared_ptr is created, if the owning pointer is destroyed in a
@@ -139,5 +154,16 @@ private:
 
 private:
 	SubscribersType m_subscribers;
+	std::mutex      m_subscriberMutex;
+
+public:
+	TitanDispatcher(const TitanDispatcher&) = delete;
+	TitanDispatcher& operator=(const TitanDispatcher&) = delete;
+
+	// We can't really move an atomic, but since it's a constructor, creating a new mutex should
+	// be fine. But might be a problem during assignment, so not defining that one.
+	TitanDispatcher(TitanDispatcher&& other) noexcept
+		: m_subscribers{ other.m_subscribers }, m_subscriberMutex{}
+	{}
 };
 #endif
